@@ -199,11 +199,11 @@ margin = st.sidebar.slider(
 st.sidebar.markdown("---")
 st.sidebar.markdown("**🎯 Strategic Weights**")
 st.sidebar.caption("Multiplier applied to ROI score by competitive tier.")
-w_critical = st.sidebar.slider("CRITICAL weight", 1.0, 4.0, 2.0, 0.5,
+w_critical = st.sidebar.slider("CRITICAL weight", 1.0, 4.0, 2.0, 0.1,
     help="Share below redline — immediate risk of position loss")
-w_mild = st.sidebar.slider("MILD weight", 1.0, 3.0, 1.3, 0.1,
+w_mild = st.sidebar.slider("MILD weight", 1.0, 4.0, 1.3, 0.1,
     help="Share between redline and redline+10pp — watch zone")
-w_safe = st.sidebar.slider("SAFE weight", 0.5, 2.0, 1.0, 0.1,
+w_safe = st.sidebar.slider("SAFE weight", 0.5, 4.0, 1.0, 0.1,
     help="Share above redline+10pp — comfortable position")
 growth_w = st.sidebar.slider("Growth bonus weight", 0.0, 1.0, 0.5, 0.1,
     help="How annual growth amplifies the allocation score")
