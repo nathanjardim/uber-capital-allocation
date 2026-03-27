@@ -244,7 +244,7 @@ def run_optimization(
 
         gb_delta      = trips * row['Avg_Fare']
         npm1          = gb_delta * margin - inv
-        ltv_financial = gb_delta * ltv_fin_mult
+        ltv_financial = gb_delta * margin * ltv_fin_mult
         ltv_strategic = gb_delta * margin * ltv_map[row['tier']]
         ltv           = ltv_financial + ltv_strategic
         platform_value = npm1 + ltv
