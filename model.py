@@ -1,8 +1,9 @@
-# model.py — v6
+# model.py — v7
 # Capital Allocation Optimization · Score-based greedy · Q1 impact + LTV projection
 
 import pandas as pd
 import numpy as np
+
 
 # ============================================================================
 # DATA
@@ -77,6 +78,7 @@ def load_market_data():
         ],
     })
 
+
 # ============================================================================
 # LTV BASE MULTIPLIER
 # ============================================================================
@@ -84,13 +86,13 @@ def load_market_data():
 def compute_ltv_mult_base(retention=0.35, discount_rate=0.025, n_quarters=8):
     """
     PV of $1 retained revenue over n_quarters:
-        ltv_mult_base = Σ (retention^t / (1+discount_rate)^t), t=1..n_quarters
+    ltv_mult_base = Σ (retention^t / (1+discount_rate)^t), t=1..n_quarters
 
     Parameters
     ----------
-    retention     : 0.35  — ride-hailing LatAm quarterly retention (BCG/Apptopia 2023)
-    discount_rate : 0.025 — ~10% p.a., aligned with Uber's public WACC
-    n_quarters    : 8     — standard 2-year strategic planning horizon
+    retention      : 0.35  — ride-hailing LatAm quarterly retention (BCG/Apptopia 2023)
+    discount_rate  : 0.025 — ~10% p.a., aligned with Uber's public WACC
+    n_quarters     : 8     — standard 2-year strategic planning horizon
 
     With defaults → ltv_mult_base ≈ 0.51×
     Tier multipliers (3×/2×/1.5×) add a strategic position premium on top.
@@ -115,14 +117,15 @@ def build_ltv_curves(retention=0.35, discount_rate=0.025,
         pv_accum  += (retention ** t) / ((1 + discount_rate) ** t)
         ret_accum += retention ** t
         rows.append({
-            'Quarter': f'Q{t}',
+            'Quarter':                      f'Q{t}',
             'Retention Pure (accumulated)': round(ret_accum, 4),
             'PV Pure (accumulated)':        round(pv_accum, 4),
-            'CRITICAL mult': ltv_critical,
-            'MILD mult':     ltv_mild,
-            'SAFE mult':     ltv_safe,
+            'CRITICAL mult':                ltv_critical,
+            'MILD mult':                    ltv_mild,
+            'SAFE mult':                    ltv_safe,
         })
     return pd.DataFrame(rows)
+
 
 # ============================================================================
 # TIER CLASSIFICATION
@@ -135,6 +138,7 @@ def classify_tier(share, redline):
     elif share < redline + 0.10:
         return 'MILD'
     return 'SAFE'
+
 
 # ============================================================================
 # MAIN OPTIMIZATION
@@ -156,37 +160,45 @@ def run_optimization(
 ):
     df = df.copy()
     df['Trips_Base'] = df['GB'] / df['Avg_Fare']
-    df['tier']       = df.apply(lambda r: classify_tier(r['Share'], r['Redline']), axis=1)
+    df['tier'] = df.apply(lambda r: classify_tier(r['Share'], r['Redline']), axis=1)
 
     BUDGET  = df['GB'].sum() * budget_pct
     ltv_map = {'CRITICAL': ltv_critical, 'MILD': ltv_mild, 'SAFE': ltv_safe}
 
     # ── Lever eligibility ─────────────────────────────────────────────────
-    df['rider_ok'] = df['CM'] >= 0.00
-    df['driver_ok']= df['CM'] >= -0.10
-    df['price_ok'] = df['Avg_Fare'] > df['Comp_Fare']
+    df['rider_ok']  = df['CM'] >= 0.00
+    df['driver_ok'] = df['CM'] >= -0.10
+    df['price_ok']  = df['Avg_Fare'] > df['Comp_Fare']
 
     # ── ROI per lever (incremental trips or supply per $ invested) ────────
-    df['roi_rider']  = df.apply(
+    df['roi_rider'] = df.apply(
         lambda r: (1.0 / r['CPIT']) * r['Avg_Fare'] * margin if r['rider_ok'] else 0.0, axis=1)
     df['roi_driver'] = df.apply(
         lambda r: (r['TPH'] / r['CPISH']) * (1.0 / r['CR']) * r['Avg_Fare'] * margin
         if r['driver_ok'] else 0.0, axis=1)
-    df['roi_price']  = df.apply(
+    df['roi_price'] = df.apply(
         lambda r: (1.0 / r['CPIT']) * r['Avg_Fare'] * margin * 0.85  # 15% fare-dilution penalty
         if r['price_ok'] else 0.0, axis=1)
 
     df['best_roi'] = df[['roi_rider', 'roi_driver', 'roi_price']].max(axis=1)
     df['best_e']   = df.apply(lambda r: max(
-        (1.0 / r['CPIT'])                            if r['rider_ok']  else 0.0,
-        (r['TPH'] / r['CPISH']) * (1.0 / r['CR'])   if r['driver_ok'] else 0.0,
-        (1.0 / r['CPIT']) * 0.85                     if r['price_ok']  else 0.0,
+        (1.0 / r['CPIT'])                              if r['rider_ok']  else 0.0,
+        (r['TPH'] / r['CPISH']) * (1.0 / r['CR'])     if r['driver_ok'] else 0.0,
+        (1.0 / r['CPIT']) * 0.85                       if r['price_ok']  else 0.0,
     ), axis=1)
 
-    # ── Hurdle filter: PV per $ must exceed hurdle_rate (CRITICAL exempt) ─
-    df['pv_per_dollar']  = df.apply(
+    # ── Hurdle filter ─────────────────────────────────────────────────────
+    df['pv_per_dollar'] = df.apply(
         lambda r: r['best_e'] * r['Avg_Fare'] * margin * (1 + ltv_map[r['tier']]) - 1, axis=1)
-    df['passes_hurdle']  = (df['tier'] == 'CRITICAL') | (df['pv_per_dollar'] >= hurdle_rate)
+
+    # Supply crisis override: high surge + low completion rate bypass the hurdle
+    df['supply_crisis'] = (df['Surge'] > 0.25) & (df['CR'] < 0.72)
+
+    df['passes_hurdle'] = (
+        (df['tier'] == 'CRITICAL') |
+        (df['supply_crisis'])      |
+        (df['pv_per_dollar'] >= hurdle_rate)
+    )
 
     # ── Composite score: ROI × strategic weight × growth bonus ───────────
     weight_map        = {'CRITICAL': w_critical, 'MILD': w_mild, 'SAFE': w_safe}
@@ -208,7 +220,6 @@ def run_optimization(
     df['cap']            = df['GB'] * cap_pct
     df['min_investment'] = df[['min_investment', 'cap']].min(axis=1)
 
-    # Scale down if minimums exceed total budget
     total_min = df['min_investment'].sum()
     if total_min > BUDGET:
         df['min_investment'] *= BUDGET / total_min
@@ -233,8 +244,8 @@ def run_optimization(
         df.loc[~df['passes_hurdle'], 'headroom'] = 0.0
         remaining -= capped.sum()
 
-    budget_used      = df['investment'].sum()
-    budget_returned  = BUDGET - budget_used
+    budget_used     = df['investment'].sum()
+    budget_returned = BUDGET - budget_used
 
     # ── Per-market impact projection ──────────────────────────────────────
     results = []
@@ -243,7 +254,6 @@ def run_optimization(
         inv       = row['investment']
         roi_total = row['roi_rider'] + row['roi_driver'] + row['roi_price']
 
-        # Lever split proportional to relative ROI
         if roi_total > 0 and inv > 0:
             pct_r = row['roi_rider']  / roi_total
             pct_d = row['roi_driver'] / roi_total
@@ -255,9 +265,9 @@ def run_optimization(
         inv_d = inv * pct_d
         inv_p = inv * pct_p
 
-        trips_r = (inv_r / row['CPIT'])                                   if inv_r > 0 and row['rider_ok']  else 0.0
-        trips_d = (inv_d / row['CPISH']) * row['TPH'] * (1 / row['CR'])  if inv_d > 0 and row['driver_ok'] else 0.0
-        trips_p = (inv_p / row['CPIT'])                                   if inv_p > 0 and row['price_ok']  else 0.0
+        trips_r = (inv_r / row['CPIT']) if inv_r > 0 and row['rider_ok'] else 0.0
+        trips_d = (inv_d / row['CPISH']) * row['TPH'] * (1 / row['CR']) if inv_d > 0 and row['driver_ok'] else 0.0
+        trips_p = (inv_p / row['CPIT']) if inv_p > 0 and row['price_ok'] else 0.0
         trips   = trips_r + trips_d + trips_p
 
         gb_delta       = trips * row['Avg_Fare']
@@ -265,7 +275,6 @@ def run_optimization(
         ltv            = trips * row['Avg_Fare'] * margin * ltv_map[row['tier']]
         platform_value = npm1 + ltv
 
-        # Share lift capped by available surge headroom
         raw_lift = (trips / row['Trips_Base']) * 0.5 if row['Trips_Base'] > 0 else 0.0
         share_q1 = min(row['Share'] + raw_lift, row['Share'] + row['Surge'], 1.0)
 
@@ -294,21 +303,21 @@ def run_optimization(
     results_df = pd.DataFrame(results).sort_values('Investment', ascending=False)
 
     summary = {
-        'budget':            BUDGET / 1e6,
-        'allocated':         budget_used / 1e6,
-        'returned':          budget_returned / 1e6,
-        'utilization':       budget_used / BUDGET,
-        'npm1':              results_df['NPM1'].sum() / 1e6,
-        'ltv':               results_df['LTV'].sum() / 1e6,
-        'platform_value':    results_df['Platform_Value'].sum() / 1e6,
-        'redline_ok':        (results_df['Redline_Q1_OK'] == '✓').sum(),
-        'total_markets':     len(results_df),
-        'markets_funded':    (results_df['Investment'] > 0).sum(),
-        'markets_excluded':  (results_df['Passes_Hurdle'] == '✗').sum(),
-        'n_critical':        (results_df['Tier'] == 'CRITICAL').sum(),
-        'n_mild':            (results_df['Tier'] == 'MILD').sum(),
-        'n_safe':            (results_df['Tier'] == 'SAFE').sum(),
-        'ltv_mult_base':     compute_ltv_mult_base(),
+        'budget':           BUDGET / 1e6,
+        'allocated':        budget_used / 1e6,
+        'returned':         budget_returned / 1e6,
+        'utilization':      budget_used / BUDGET,
+        'npm1':             results_df['NPM1'].sum() / 1e6,
+        'ltv':              results_df['LTV'].sum() / 1e6,
+        'platform_value':   results_df['Platform_Value'].sum() / 1e6,
+        'redline_ok':       (results_df['Redline_Q1_OK'] == '✓').sum(),
+        'total_markets':    len(results_df),
+        'markets_funded':   (results_df['Investment'] > 0).sum(),
+        'markets_excluded': (results_df['Passes_Hurdle'] == '✗').sum(),
+        'n_critical':       (results_df['Tier'] == 'CRITICAL').sum(),
+        'n_mild':           (results_df['Tier'] == 'MILD').sum(),
+        'n_safe':           (results_df['Tier'] == 'SAFE').sum(),
+        'ltv_mult_base':    compute_ltv_mult_base(),
     }
 
     return results_df, summary
