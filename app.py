@@ -462,20 +462,23 @@ if run:
     )
 
     t3 = results[[
-        'Market', 'Tier', 'Trips_Q1', 'GB_Delta_Q1', 'NPM1', 'LTV', 'Platform_Value'
+        'Market', 'Tier', 'Trips_Q1', 'GB_Delta_Q1', 'NPM1',
+        'LTV_Financial', 'LTV_Strategic', 'Platform_Value'
     ]].copy()
     t3['Trips_Q1']       = t3['Trips_Q1'].apply(
         lambda v: f"{v/1e6:.2f}M" if v >= 1e6 else f"{v/1e3:.1f}K" if v >= 1000 else f"{v:.0f}"
     )
     t3['GB_Delta_Q1']    = t3['GB_Delta_Q1'].apply(lambda v: f"${v/1e6:.2f}M")
     t3['NPM1']           = t3['NPM1'].apply(lambda v: f"${v/1e6:.2f}M")
-    t3['LTV']            = t3['LTV'].apply(lambda v: f"${v/1e6:.2f}M")
+    t3['LTV_Financial']  = t3['LTV_Financial'].apply(lambda v: f"${v/1e6:.2f}M")
+    t3['LTV_Strategic']  = t3['LTV_Strategic'].apply(lambda v: f"${v/1e6:.2f}M")
     t3['Platform_Value'] = t3['Platform_Value'].apply(lambda v: f"${v/1e6:.1f}M")
     t3 = t3.rename(columns={
         'Trips_Q1':       'Incremental Trips (Q1)',
         'GB_Delta_Q1':    'GB Impact (Q1)',
         'NPM1':           'Net Profit Q1',
-        'LTV':            'LTV Projection',
+        'LTV_Financial':  'LTV — Cash Flow (retention)',
+        'LTV_Strategic':  'LTV — Position Premium',
         'Platform_Value': 'Total Platform Value',
     })
     st.dataframe(t3, use_container_width=True, hide_index=True)

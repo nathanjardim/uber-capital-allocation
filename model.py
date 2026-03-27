@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 
-
 def load_market_data():
     return pd.DataFrame({
         'Market': [
@@ -85,15 +84,15 @@ def build_ltv_curves(retention=0.35, discount_rate=0.025,
     rows = []
     pv_accum = ret_accum = 0.0
     for t in range(1, n_quarters + 1):
-        pv_accum  += (retention ** t) / ((1 + discount_rate) ** t)
+        pv_accum += (retention ** t) / ((1 + discount_rate) ** t)
         ret_accum += retention ** t
         rows.append({
-            'Quarter':                       f'Q{t}',
-            'Retention Pure (accumulated)':  round(ret_accum, 4),
-            'PV Pure (accumulated)':         round(pv_accum,  4),
-            'CRITICAL mult':                 ltv_critical,
-            'MILD mult':                     ltv_mild,
-            'SAFE mult':                     ltv_safe,
+            'Quarter': f'Q{t}',
+            'Retention Pure (accumulated)': round(ret_accum, 4),
+            'PV Pure (accumulated)': round(pv_accum, 4),
+            'CRITICAL mult': ltv_critical,
+            'MILD mult': ltv_mild,
+            'SAFE mult': ltv_safe,
         })
     return pd.DataFrame(rows)
 
@@ -108,21 +107,21 @@ def classify_tier(share, redline):
 
 def run_optimization(
     df,
-    budget_pct   = 0.10,
-    cap_pct      = 0.20,
-    margin       = 0.25,
-    w_critical   = 2.0,
-    w_mild       = 1.3,
-    w_safe       = 1.0,
-    growth_weight= 0.5,
-    ltv_critical = 3.0,
-    ltv_mild     = 2.0,
-    ltv_safe     = 1.5,
-    hurdle_rate  = 1.5,
+    budget_pct    = 0.10,
+    cap_pct       = 0.20,
+    margin        = 0.25,
+    w_critical    = 2.0,
+    w_mild        = 1.3,
+    w_safe        = 1.0,
+    growth_weight = 0.5,
+    ltv_critical  = 3.0,
+    ltv_mild      = 2.0,
+    ltv_safe      = 1.5,
+    hurdle_rate   = 1.5,
 ):
     df = df.copy()
     df['Trips_Base'] = df['GB'] / df['Avg_Fare']
-    df['tier']       = df.apply(lambda r: classify_tier(r['Share'], r['Redline']), axis=1)
+    df['tier'] = df.apply(lambda r: classify_tier(r['Share'], r['Redline']), axis=1)
 
     BUDGET  = df['GB'].sum() * budget_pct
     ltv_map = {'CRITICAL': ltv_critical, 'MILD': ltv_mild, 'SAFE': ltv_safe}
@@ -144,10 +143,10 @@ def run_optimization(
         if r['price_ok'] else 0.0, axis=1)
 
     df['best_roi'] = df[['roi_rider', 'roi_driver', 'roi_price']].max(axis=1)
-    df['best_e']   = df.apply(lambda r: max(
-        (1.0 / r['CPIT'])                            if r['rider_ok']  else 0.0,
-        (r['TPH'] / r['CPISH']) * (1.0 / r['CR'])   if r['driver_ok'] else 0.0,
-        (1.0 / r['CPIT']) * 0.85                     if r['price_ok']  else 0.0,
+    df['best_e'] = df.apply(lambda r: max(
+        (1.0 / r['CPIT']) if r['rider_ok'] else 0.0,
+        (r['TPH'] / r['CPISH']) * (1.0 / r['CR']) if r['driver_ok'] else 0.0,
+        (1.0 / r['CPIT']) * 0.85 if r['price_ok'] else 0.0,
     ), axis=1)
 
     # hurdle filter
@@ -163,10 +162,10 @@ def run_optimization(
     )
 
     # composite score
-    weight_map        = {'CRITICAL': w_critical, 'MILD': w_mild, 'SAFE': w_safe}
-    df['weight']      = df['tier'].map(weight_map)
-    df['growth_bonus']= 1.0 + df['Growth'].clip(lower=0) * growth_weight
-    df['score']       = df.apply(
+    weight_map = {'CRITICAL': w_critical, 'MILD': w_mild, 'SAFE': w_safe}
+    df['weight']       = df['tier'].map(weight_map)
+    df['growth_bonus'] = 1.0 + df['Growth'].clip(lower=0) * growth_weight
+    df['score'] = df.apply(
         lambda r: r['best_roi'] * r['weight'] * r['growth_bonus']
         if r['passes_hurdle'] else 0.0, axis=1)
 
@@ -210,10 +209,11 @@ def run_optimization(
     budget_returned = BUDGET - budget_used
 
     # per-market impact projection
-    results = []
+    results      = []
+    ltv_fin_mult = compute_ltv_mult_base()  # calculado uma vez, fora do loop
 
     for _, row in df.iterrows():
-        inv       = row['investment']
+        inv = row['investment']
         roi_total = row['roi_rider'] + row['roi_driver'] + row['roi_price']
 
         if roi_total > 0 and inv > 0:
@@ -227,29 +227,35 @@ def run_optimization(
         inv_d = inv * pct_d
         inv_p = inv * pct_p
 
-        trips_r = (inv_r / row['CPIT'])                                   if inv_r > 0 and row['rider_ok']  else 0.0
-        trips_d = (inv_d / row['CPISH']) * row['TPH'] * (1 / row['CR'])  if inv_d > 0 and row['driver_ok'] else 0.0
-        trips_p = (inv_p / row['CPIT'])                                   if inv_p > 0 and row['price_ok']  else 0.0
+        trips_r = (inv_r / row['CPIT']) if inv_r > 0 and row['rider_ok'] else 0.0
+        trips_d = (inv_d / row['CPISH']) * row['TPH'] * (1 / row['CR']) \
+                  if inv_d > 0 and row['driver_ok'] else 0.0
+        trips_p = (inv_p / row['CPIT']) if inv_p > 0 and row['price_ok'] else 0.0
         trips   = trips_r + trips_d + trips_p
 
-        # cash outlay = only rider + driver incentives (real disbursement)
         cash_outlay     = inv_r + inv_d
         pricing_revenue = trips_p * row['Avg_Fare']
 
-        # incentive split as % of cash outlay only
         if cash_outlay > 0:
             pct_r_cash = inv_r / cash_outlay
             pct_d_cash = inv_d / cash_outlay
         else:
             pct_r_cash = pct_d_cash = 0.0
 
-        gb_delta       = trips * row['Avg_Fare']
-        npm1           = gb_delta * margin - inv
-        ltv            = trips * row['Avg_Fare'] * margin * ltv_map[row['tier']]
+        gb_delta      = trips * row['Avg_Fare']
+        npm1          = gb_delta * margin - inv
+        ltv_financial = gb_delta * ltv_fin_mult
+        ltv_strategic = gb_delta * margin * ltv_map[row['tier']]
+        ltv           = ltv_financial + ltv_strategic
         platform_value = npm1 + ltv
 
         raw_lift = (trips / row['Trips_Base']) * 0.5 if row['Trips_Base'] > 0 else 0.0
-        share_q1 = min(row['Share'] + raw_lift, row['Share'] + (1 - row['CR']), 1.0)
+        share_q1 = min(
+            row['Share'] + raw_lift,
+            row['Share'] + (1 - row['CR']),
+            row['Share'] + row['Surge'],
+            1.0
+        )
 
         results.append({
             'Market':          row['Market'],
@@ -266,6 +272,8 @@ def run_optimization(
             'Trips_Q1':        trips,
             'GB_Delta_Q1':     gb_delta,
             'NPM1':            npm1,
+            'LTV_Financial':   ltv_financial,
+            'LTV_Strategic':   ltv_strategic,
             'LTV':             ltv,
             'Platform_Value':  platform_value,
             'Share_Q0':        row['Share'],
