@@ -249,7 +249,7 @@ def run_optimization(
         platform_value = npm1 + ltv
 
         raw_lift = (trips / row['Trips_Base']) * 0.5 if row['Trips_Base'] > 0 else 0.0
-        share_q1 = min(row['Share'] + raw_lift, row['Share'] + row['Surge'], 1.0)
+        share_q1 = min(row['Share'] + raw_lift, row['Share'] + (1 - row['CR']), 1.0)
 
         results.append({
             'Market':          row['Market'],
