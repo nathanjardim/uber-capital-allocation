@@ -105,6 +105,7 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
     # --- SETUP & INITIAL CALCULATIONS ---
     df = df.copy()
     df['Trips_Base'] = df['GB'] / df['Avg_Fare']
+    # Budget is 10% of total regional Gross Bookings
     BUDGET = df['GB'].sum() * budget_pct
     
     ltv_map = {'CRITICAL': ltv_critical, 'MILD': ltv_mild, 'SAFE': ltv_safe}
@@ -117,32 +118,41 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
     # --- 2. LEVER ELIGIBILITY RULES ---
     df['rider_ok']  = df['CM'] >= 0.00
     df['driver_ok'] = df['CM'] >= -0.10
-    df['price_ok']  = (df['Avg_Fare'] > df['Comp_Fare'] * 1.03) & ~((df['Surge'] > 0.25) & (df['CR'] < 0.72))
+    # Price lever is unlocked if we have a competitive price advantage (>3%)
+    df['price_ok']  = (df['Comp_Fare'] > df['Avg_Fare'] * 1.03) & ~((df['Surge'] > 0.25) & (df['CR'] < 0.72))
 
-    # --- 3. ROI CALCULATION & EFFICIENCY ---
+    # --- 3. PRICING REVENUE (SELF-FUNDED) ---
+    # Price increases generate 5% extra revenue on market GB
+    df['pricing_revenue'] = np.where(df['price_ok'], df['GB'] * 0.05, 0.0)
+    # Elasticity penalty: 15% reduction in trip impact efficiency
+    df['trips_price_impact'] = np.where(df['price_ok'], (df['pricing_revenue'] / df['Avg_Fare']) * 0.85, 0.0)
+
+    # --- 4. ROI CALCULATION (FOR DISCRETIONARY BUDGET) ---
+    # ROI = (Trips per $) * Price * Margin
     df['roi_rider']  = np.where(df['rider_ok'], (1.0 / df['CPIT']) * df['Avg_Fare'] * margin, 0.0)
     df['roi_driver'] = np.where(df['driver_ok'], (df['TPH'] / df['CPISH']) * (1.0 / df['CR']) * df['Avg_Fare'] * margin, 0.0)
-    df['roi_price']  = np.where(df['price_ok'], (1.0 / df['CPIT']) * 0.85 * df['Avg_Fare'] * margin, 0.0)
-    df['best_roi']   = df[['roi_rider', 'roi_driver', 'roi_price']].max(axis=1)
+    
+    # Only Rider and Driver compete for the 10% cash budget
+    df['best_roi']   = df[['roi_rider', 'roi_driver']].max(axis=1)
 
     e_rider  = np.where(df['rider_ok'], 1.0 / df['CPIT'], 0.0)
     e_driver = np.where(df['driver_ok'], (df['TPH'] / df['CPISH']) * (1.0 / df['CR']), 0.0)
-    e_price  = np.where(df['price_ok'], (1.0 / df['CPIT']) * 0.85, 0.0)
-    df['best_e'] = np.maximum.reduce([e_rider, e_driver, e_price])
+    df['best_e'] = np.maximum(e_rider, e_driver)
 
-    # --- 4. HURDLE RATE FILTER ---
+    # --- 5. HURDLE RATE FILTER ---
     df['ltv_strat'] = df['tier'].map(ltv_map)
     df['pv_per_dollar'] = df['best_e'] * df['Avg_Fare'] * margin * (1 + ltv_fin_mult + df['ltv_strat']) - 1
     df['supply_crisis'] = (df['Surge'] > 0.25) & (df['CR'] < 0.72)
+    # Critical markets bypass the hurdle for strategic defense
     df['passes_hurdle'] = (df['tier'] == 'CRITICAL') | df['supply_crisis'] | (df['pv_per_dollar'] >= hurdle_rate)
 
-    # --- 5. COMPOSITE SCORING ---
+    # --- 6. COMPOSITE SCORING ---
     weight_map = {'CRITICAL': w_critical, 'MILD': w_mild, 'SAFE': w_safe}
     df['weight'] = df['tier'].map(weight_map)
     df['growth_bonus'] = 1.0 + df['Growth'].clip(lower=0) * growth_weight
     df['score'] = np.where(df['passes_hurdle'], df['best_roi'] * df['weight'] * df['growth_bonus'], 0.0)
 
-    # --- 6. CAPS & MINIMUM INVESTMENT ---
+    # --- 7. CAPS & MINIMUM INVESTMENT ---
     lift = np.minimum(df['Redline'] - df['Share'] + 0.01, df['Surge'])
     trips_need = lift * df['Trips_Base'] / 0.5
     df['min_investment'] = np.where((df['tier'] == 'CRITICAL') & (df['best_e'] > 0), trips_need / df['best_e'], 0.0)
@@ -153,7 +163,7 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
     if total_min > BUDGET:
         df['min_investment'] *= (BUDGET / total_min)
 
-    # --- 7. GREEDY ALLOCATION ALGORITHM ---
+    # --- 8. GREEDY ALLOCATION (CASH BUDGET ONLY) ---
     df['investment'] = df['min_investment'].copy()
     df['headroom'] = (df['cap'] - df['investment']).clip(lower=0)
     df.loc[~df['passes_hurdle'], 'headroom'] = 0.0
@@ -174,31 +184,27 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
     budget_used = df['investment'].sum()
     budget_returned = BUDGET - budget_used
 
-    # --- 8. IMPACT PROJECTION (Q1 & LTV) ---
-    roi_total = df['roi_rider'] + df['roi_driver'] + df['roi_price']
+    # --- 9. IMPACT PROJECTION ---
+    roi_total = df['roi_rider'] + df['roi_driver']
     valid_roi = (roi_total > 0) & (df['investment'] > 0)
 
     pct_r = np.where(valid_roi, df['roi_rider'] / roi_total, 0.0)
     pct_d = np.where(valid_roi, df['roi_driver'] / roi_total, 0.0)
-    pct_p = np.where(valid_roi, df['roi_price'] / roi_total, 0.0)
 
     inv_r = df['investment'] * pct_r
     inv_d = df['investment'] * pct_d
-    inv_p = df['investment'] * pct_p
 
     trips_r = np.where((inv_r > 0) & df['rider_ok'], inv_r / df['CPIT'], 0.0)
     trips_d = np.where((inv_d > 0) & df['driver_ok'], (inv_d / df['CPISH']) * df['TPH'] * (1 / df['CR']), 0.0)
-    trips_p = np.where((inv_p > 0) & df['price_ok'], inv_p / df['CPIT'], 0.0)
-    trips = trips_r + trips_d + trips_p
-
+    
+    # Impact = Rider trips + Driver trips + Pricing-adjusted trips
+    trips = trips_r + trips_d + df['trips_price_impact']
     cash_outlay = inv_r + inv_d
-    pricing_revenue = trips_p * df['Avg_Fare']
-
-    pct_r_cash = np.where(cash_outlay > 0, inv_r / cash_outlay, 0.0)
-    pct_d_cash = np.where(cash_outlay > 0, inv_d / cash_outlay, 0.0)
 
     gb_delta = trips * df['Avg_Fare']
-    npm1 = gb_delta * margin - cash_outlay
+    # Profit Q1 (NPM1) = Incremental Margin + Price Rev - Cash Spent
+    npm1 = (gb_delta * margin) + df['pricing_revenue'] - cash_outlay
+    
     ltv_financial = gb_delta * margin * ltv_fin_mult
     ltv_strategic = gb_delta * margin * df['ltv_strat']
     ltv = ltv_financial + ltv_strategic
@@ -212,7 +218,7 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
         np.ones(len(df))
     ])
 
-    # --- 9. RESULTS AGGREGATION ---
+    # --- 10. RESULTS AGGREGATION ---
     results_df = pd.DataFrame({
         'Market': df['Market'],
         'Tier': df['tier'],
@@ -220,11 +226,10 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
         'Passes_Hurdle': np.where(df['passes_hurdle'], '✓', '✗'),
         'PV_per_Dollar': df['pv_per_dollar'].round(3),
         'Investment': df['investment'],
-        'Min_Investment': df['min_investment'],
         'Cash_Investment': cash_outlay,
-        'Pricing_Revenue': pricing_revenue,
-        'Rider_Pct': pct_r_cash,
-        'Driver_Pct': pct_d_cash,
+        'Pricing_Revenue': df['pricing_revenue'],
+        'Rider_Pct': pct_r,
+        'Driver_Pct': pct_d,
         'Trips_Q1': trips,
         'GB_Delta_Q1': gb_delta,
         'NPM1': npm1,
