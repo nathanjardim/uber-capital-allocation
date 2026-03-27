@@ -125,6 +125,9 @@ def run_optimization(
 
     BUDGET  = df['GB'].sum() * budget_pct
     ltv_map = {'CRITICAL': ltv_critical, 'MILD': ltv_mild, 'SAFE': ltv_safe}
+    
+    # LTV Financeiro calculado aqui para uso no Hurdle Rate
+    ltv_fin_mult = compute_ltv_mult_base()
 
     # lever eligibility
     df['rider_ok']  = df['CM'] >= 0.00
@@ -139,8 +142,7 @@ def run_optimization(
         lambda r: (r['TPH'] / r['CPISH']) * (1.0 / r['CR']) * r['Avg_Fare'] * margin
         if r['driver_ok'] else 0.0, axis=1)
     df['roi_price'] = df.apply(
-        lambda r: (1.0 / r['CPIT']) * r['Avg_Fare'] * margin * 0.85
-        if r['price_ok'] else 0.0, axis=1)
+        lambda r: (1.0 / r['CPIT']) * 0.85 * r['Avg_Fare'] * margin if r['price_ok'] else 0.0, axis=1)
 
     df['best_roi'] = df[['roi_rider', 'roi_driver', 'roi_price']].max(axis=1)
     df['best_e'] = df.apply(lambda r: max(
@@ -149,9 +151,9 @@ def run_optimization(
         (1.0 / r['CPIT']) * 0.85 if r['price_ok'] else 0.0,
     ), axis=1)
 
-    # hurdle filter
+    # hurdle filter (agora inclui o ltv_fin_mult)
     df['pv_per_dollar'] = df.apply(
-        lambda r: r['best_e'] * r['Avg_Fare'] * margin * (1 + ltv_map[r['tier']]) - 1, axis=1)
+        lambda r: r['best_e'] * r['Avg_Fare'] * margin * (1 + ltv_fin_mult + ltv_map[r['tier']]) - 1, axis=1)
 
     df['supply_crisis'] = (df['Surge'] > 0.25) & (df['CR'] < 0.72)
 
@@ -210,7 +212,6 @@ def run_optimization(
 
     # per-market impact projection
     results      = []
-    ltv_fin_mult = compute_ltv_mult_base()  # calculado uma vez, fora do loop
 
     for _, row in df.iterrows():
         inv = row['investment']
@@ -243,11 +244,13 @@ def run_optimization(
             pct_r_cash = pct_d_cash = 0.0
 
         gb_delta      = trips * row['Avg_Fare']
-        npm1          = gb_delta * margin - inv
+        npm1 = gb_delta * margin - cash_outlay
         ltv_financial = gb_delta * margin * ltv_fin_mult
         ltv_strategic = gb_delta * margin * ltv_map[row['tier']]
         ltv           = ltv_financial + ltv_strategic
-        platform_value = npm1 + ltv
+        
+        # Corrigido para não duplicar o pricing_revenue
+        platform_value = npm1 + ltv 
 
         raw_lift = (trips / row['Trips_Base']) * 0.5 if row['Trips_Base'] > 0 else 0.0
         share_q1 = min(

@@ -427,24 +427,33 @@ if run:
     )
 
     t2 = results[results['Investment'] > 0][[
-    'Market', 'Tier', 'Cash_Investment', 'Pricing_Revenue', 'Rider_Pct', 'Driver_Pct'
+        'Market', 'Tier', 'Investment', 'Cash_Investment', 'Pricing_Revenue', 'Rider_Pct', 'Driver_Pct'
     ]].copy()
+    t2['Pricing_Pct'] = t2.apply(
+        lambda r: (r['Investment'] - r['Cash_Investment']) / r['Investment']
+        if r['Investment'] > 0 else 0.0, axis=1
+    )
     t2['Cash_Investment']  = t2['Cash_Investment'].apply(lambda v: f"${v/1e6:.2f}M")
     t2['Pricing_Revenue']  = t2['Pricing_Revenue'].apply(lambda v: f"${v/1e6:.2f}M" if v > 0 else "—")
     t2['Rider_Pct']        = t2['Rider_Pct'].apply(lambda v: f"{v:.0%}")
     t2['Driver_Pct']       = t2['Driver_Pct'].apply(lambda v: f"{v:.0%}")
+    t2['Pricing_Pct'] = t2['Pricing_Pct'].apply(lambda v: f"{v:.0%}" if v > 0 else "—")
+    t2 = t2.drop(columns=['Investment'])
     t2 = t2.rename(columns={
         'Cash_Investment': 'Cash Outlay (Uber pays)',
         'Pricing_Revenue': 'Pricing Revenue (self-funded)',
         'Rider_Pct':       'Rider Incentives — % of outlay',
         'Driver_Pct':      'Driver Incentives — % of outlay',
+        'Pricing_Pct': 'Core-Pricing — % of total investment',
     })
     st.dataframe(t2, use_container_width=True, hide_index=True)
+    
+    # Texto corrigido!
     st.info(
         "💡 Cash Outlay = real disbursement on Rider & Driver incentives · "
-        "Pricing Revenue = self-funded via base fare increase (no budget consumed) · "
+        "Pricing Lever = subsidizing core fare to close competitive gap (no direct budget consumed, impacts margin) · "
         "Driver ROI amplified by 1/C·R (latent unmet demand) · "
-        "Price lever requires >3% fare advantage over competitor & no supply crisis"
+        "Price lever requires >3% fare disadvantage vs competitor & no supply crisis"
     )
     st.markdown('<hr class="uber-divider">', unsafe_allow_html=True)
 
@@ -509,7 +518,7 @@ if run:
             if t == 1:
                 cumulative += npm1
             else:
-                pv_t = gb_delta * margin * (RETENTION ** (t - 1)) / ((1 + DISCOUNT) ** (t - 1))
+                pv_t = gb_delta * margin * (RETENTION ** t) / ((1 + DISCOUNT) ** t)
                 cumulative += pv_t
             values.append(round(cumulative / 1e6, 3))
         curve_data[row['Market']] = {'values': values, 'tier': row['Tier']}
