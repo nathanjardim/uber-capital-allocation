@@ -427,24 +427,24 @@ if run:
     )
 
     t2 = results[results['Investment'] > 0][[
-        'Market', 'Tier', 'Investment', 'Rider_Pct', 'Driver_Pct', 'Price_Pct'
+    'Market', 'Tier', 'Cash_Investment', 'Pricing_Revenue', 'Rider_Pct', 'Driver_Pct'
     ]].copy()
-    t2['Investment']  = t2['Investment'].apply(lambda v: f"${v/1e6:.2f}M")
-    t2['Rider_Pct']   = t2['Rider_Pct'].apply(lambda v: f"{v:.0%}")
-    t2['Driver_Pct']  = t2['Driver_Pct'].apply(lambda v: f"{v:.0%}")
-    t2['Price_Pct']   = t2['Price_Pct'].apply(lambda v: f"{v:.0%}")
+    t2['Cash_Investment']  = t2['Cash_Investment'].apply(lambda v: f"${v/1e6:.2f}M")
+    t2['Pricing_Revenue']  = t2['Pricing_Revenue'].apply(lambda v: f"${v/1e6:.2f}M" if v > 0 else "—")
+    t2['Rider_Pct']        = t2['Rider_Pct'].apply(lambda v: f"{v:.0%}")
+    t2['Driver_Pct']       = t2['Driver_Pct'].apply(lambda v: f"{v:.0%}")
     t2 = t2.rename(columns={
-        'Investment': 'Total Investment',
-        'Rider_Pct':  'Rider Incentives (CPIT)',
-        'Driver_Pct': 'Driver Incentives (CPISH × 1/C·R)',
-        'Price_Pct':  'Core-Pricing (Base Fare)',
+        'Cash_Investment': 'Cash Outlay (Uber pays)',
+        'Pricing_Revenue': 'Pricing Revenue (self-funded)',
+        'Rider_Pct':       'Rider Incentives — % of outlay',
+        'Driver_Pct':      'Driver Incentives — % of outlay',
     })
     st.dataframe(t2, use_container_width=True, hide_index=True)
     st.info(
-        "💡 Price increases fund reinvestment · "
-        "Discounts funded by Uber margin · "
-        "Price ROI penalized 15% (fare dilution) · "
-        "Driver ROI amplified by 1/C·R (latent unmet demand)"
+        "💡 Cash Outlay = real disbursement on Rider & Driver incentives · "
+        "Pricing Revenue = self-funded via base fare increase (no budget consumed) · "
+        "Driver ROI amplified by 1/C·R (latent unmet demand) · "
+        "Price lever requires >3% fare advantage over competitor & no supply crisis"
     )
     st.markdown('<hr class="uber-divider">', unsafe_allow_html=True)
 
