@@ -216,14 +216,17 @@ st.sidebar.caption(
     "Pure-retention LTV base ≈ **0.51×**\n\n"
     "Tier multipliers include a strategic competitive-position premium."
 )
-ltv_critical = st.sidebar.slider("LTV mult — CRITICAL", 1.0, 5.0, 3.0, 0.5)
-ltv_mild     = st.sidebar.slider("LTV mult — MILD",     1.0, 4.0, 2.0, 0.5)
-ltv_safe     = st.sidebar.slider("LTV mult — SAFE",     0.5, 3.0, 1.5, 0.5)
+ltv_critical = st.sidebar.slider("LTV mult — CRITICAL", 0.5, 5.0, 1.5, 0.25)
+ltv_mild     = st.sidebar.slider("LTV mult — MILD",     0.25, 4.0, 0.75, 0.25)
+ltv_safe     = st.sidebar.slider("LTV mult — SAFE",     0.25, 3.0, 0.50, 0.25)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**📉 Hurdle Rate**")
 st.sidebar.caption(
     "Minimum Platform Value per $ invested to receive discretionary budget.\n\n"
+    "PV/$ is computed using **blended lever efficiency** (weighted average "
+    "of Rider, Driver and Discount ROIs) — reflects actual deployment, "
+    "not best-case.\n\n"
     "CRITICAL markets are always included — position defense is a strategic "
     "decision, not a financial one.\n\n"
     "**Reference:** Uber WACC ~10% p.a. → 1.5× conservative over a "
@@ -236,8 +239,9 @@ st.sidebar.caption(
     "**Lever rules**\n\n"
     "- Rider locked if CM < 0%\n"
     "- Driver locked if CM < −10%\n"
-    "- Price locked if no clear price advantage (>3% cheaper than comp)\n"
-    "- Price ROI penalized 15% (demand elasticity & volume loss)\n"
+    "- Price increase unlocked if >3% cheaper than comp (self-funded revenue)\n"
+    "- Price discount unlocked if >3% more expensive than comp (budget-funded)\n"
+    "- Price increase ROI penalized 15% (demand elasticity)\n"
     "- Driver ROI amplified by 1/C·R (latent unmet demand)\n"
     "- Share lift capped by market Surge"
 )
@@ -395,6 +399,7 @@ if run:
     st.markdown(
         '<p class="section-caption">Score = ROI/$ × strategic weight × growth bonus. '
         'CRITICAL markets receive a guaranteed minimum investment. '
+        'PV/$ uses blended lever efficiency (actual deployment mix). '
         'Markets below the hurdle receive $0 (capital preserved).</p>',
         unsafe_allow_html=True
     )
@@ -427,28 +432,34 @@ if run:
     )
 
     t2 = results[results['Investment'] > 0][[
-        'Market', 'Tier', 'Cash_Investment', 'Pricing_Revenue', 'Rider_Pct', 'Driver_Pct'
+        'Market', 'Tier', 'Cash_Investment', 'Pricing_Revenue', 'Discount_Cost',
+        'Rider_Pct', 'Driver_Pct', 'Discount_Pct'
     ]].copy()
 
     t2['Cash_Investment'] = t2['Cash_Investment'].apply(lambda v: f"${v/1e6:.2f}M")
     t2['Pricing_Revenue'] = t2['Pricing_Revenue'].apply(lambda v: f"${v/1e6:.2f}M" if v > 0 else "—")
+    t2['Discount_Cost']   = t2['Discount_Cost'].apply(lambda v: f"${v/1e6:.2f}M" if v > 1000 else "—")
 
-    t2['Rider_Pct']  = t2['Rider_Pct'].apply(lambda v: f"{v:.0%}")
-    t2['Driver_Pct'] = t2['Driver_Pct'].apply(lambda v: f"{v:.0%}")
+    t2['Rider_Pct']    = t2['Rider_Pct'].apply(lambda v: f"{v:.0%}")
+    t2['Driver_Pct']   = t2['Driver_Pct'].apply(lambda v: f"{v:.0%}")
+    t2['Discount_Pct'] = t2['Discount_Pct'].apply(lambda v: f"{v:.0%}" if v > 0.001 else "—")
 
     t2 = t2.rename(columns={
         'Cash_Investment': 'Total Cash Outlay (10% Budget)',
-        'Pricing_Revenue': 'Extra Revenue (Self-Funded)',
-        'Rider_Pct': 'Rider Incentives (% of Outlay)',
-        'Driver_Pct': 'Driver Incentives (% of Outlay)'
+        'Pricing_Revenue': 'Price Increase Rev (Self-Funded)',
+        'Discount_Cost': 'Discount Cost (Budget-Funded)',
+        'Rider_Pct': 'Rider Incentives (%)',
+        'Driver_Pct': 'Driver Incentives (%)',
+        'Discount_Pct': 'Pricing Discount (%)',
     })
     st.dataframe(t2, use_container_width=True, hide_index=True)
     
     st.info(
-        "💡 Cash Outlay = real disbursement on Rider & Driver incentives · "
-        "Pricing Lever = increasing base fare to generate self-funded revenue in markets where we have a >3% price advantage · "
+        "💡 **Cash Outlay** = total disbursement across Rider, Driver & Pricing Discount levers · "
+        "**Price Increase** = raising base fare in markets where we're >3% cheaper than competition (self-funded, no budget cost) · "
+        "**Price Discount** = reducing fare in markets where we're >3% more expensive (budget-funded, closes half the fare gap) · "
         "Driver ROI amplified by 1/C·R (latent unmet demand) · "
-        "Price lever requires >3% fare advantage vs competitor & no supply crisis"
+        "Lever split proportional to each lever's ROI"
     )
     st.markdown('<hr class="uber-divider">', unsafe_allow_html=True)
 

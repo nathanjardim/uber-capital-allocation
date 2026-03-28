@@ -100,7 +100,8 @@ def build_ltv_curves(retention=0.35, discount_rate=0.025, n_quarters=8, ltv_crit
 # =============================================================================
 def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
                      w_critical=2.0, w_mild=1.3, w_safe=1.0, growth_weight=0.5,
-                     ltv_critical=3.0, ltv_mild=2.0, ltv_safe=1.5, hurdle_rate=1.5):
+                     ltv_critical=1.5, ltv_mild=0.75, ltv_safe=0.50, hurdle_rate=1.5,
+                     discount_elasticity=1.0):
     
     # --- SETUP & INITIAL CALCULATIONS ---
     df = df.copy()
@@ -118,30 +119,52 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
     # --- 2. LEVER ELIGIBILITY RULES ---
     df['rider_ok']  = df['CM'] >= 0.00
     df['driver_ok'] = df['CM'] >= -0.10
-    # Price lever is unlocked if we have a competitive price advantage (>3%)
-    df['price_ok']  = (df['Comp_Fare'] > df['Avg_Fare'] * 1.03) & ~((df['Surge'] > 0.25) & (df['CR'] < 0.72))
+    # Price INCREASE lever: unlocked if we have a competitive price advantage (>3%)
+    df['price_up_ok'] = (df['Comp_Fare'] > df['Avg_Fare'] * 1.03) & ~((df['Surge'] > 0.25) & (df['CR'] < 0.72))
+    # [FIX 2] Price DISCOUNT lever: unlocked if we are >3% more expensive than competition
+    # Case: "discounts are funded by Uber's margin" → competes for the 10% cash budget
+    df['price_down_ok'] = (df['Avg_Fare'] > df['Comp_Fare'] * 1.03) & (df['tier'] == 'CRITICAL') & ~((df['Surge'] > 0.25) & (df['CR'] < 0.72))
 
     # --- 3. PRICING REVENUE (SELF-FUNDED) ---
     # Price increases generate 5% extra revenue on market GB
-    df['pricing_revenue'] = np.where(df['price_ok'], df['GB'] * 0.05, 0.0)
+    df['pricing_revenue'] = np.where(df['price_up_ok'], df['GB'] * 0.05, 0.0)
     # Elasticity penalty: 15% reduction in trip impact efficiency
-    df['trips_price_impact'] = np.where(df['price_ok'], (df['pricing_revenue'] / df['Avg_Fare']) * 0.85, 0.0)
+    df['trips_price_impact'] = np.where(df['price_up_ok'], (df['pricing_revenue'] / df['Avg_Fare']) * 0.85, 0.0)
 
     # --- 4. ROI CALCULATION (FOR DISCRETIONARY BUDGET) ---
     # ROI = (Trips per $) * Price * Margin
     df['roi_rider']  = np.where(df['rider_ok'], (1.0 / df['CPIT']) * df['Avg_Fare'] * margin, 0.0)
     df['roi_driver'] = np.where(df['driver_ok'], (df['TPH'] / df['CPISH']) * (1.0 / df['CR']) * df['Avg_Fare'] * margin, 0.0)
     
-    # Only Rider and Driver compete for the 10% cash budget
-    df['best_roi']   = df[['roi_rider', 'roi_driver']].max(axis=1)
+    # [FIX 2] Pricing discount ROI: competes for budget alongside Rider & Driver
+    # Discount closes half the fare gap (capped at 10%), generates trips via elasticity
+    fare_gap = (df['Avg_Fare'] / df['Comp_Fare'] - 1).clip(lower=0)
+    df['discount_pct'] = np.where(df['price_down_ok'], np.minimum(fare_gap * 0.5, 0.10), 0.0)
+    df['new_fare'] = df['Avg_Fare'] * (1 - df['discount_pct'])
+    # Efficiency: trips generated per $ of discount cost
+    # e_discount = (Trips_Base * discount_pct * elasticity) / (GB * discount_pct) = elasticity / Avg_Fare
+    e_discount = np.where(df['price_down_ok'], discount_elasticity / df['Avg_Fare'], 0.0)
+    df['roi_discount'] = np.where(df['price_down_ok'], e_discount * df['new_fare'] * margin, 0.0)
+
+    # All three levers compete for the 10% cash budget
+    df['best_roi'] = df[['roi_rider', 'roi_driver', 'roi_discount']].max(axis=1)
 
     e_rider  = np.where(df['rider_ok'], 1.0 / df['CPIT'], 0.0)
     e_driver = np.where(df['driver_ok'], (df['TPH'] / df['CPISH']) * (1.0 / df['CR']), 0.0)
-    df['best_e'] = np.maximum(e_rider, e_driver)
+    df['best_e'] = np.maximum.reduce([e_rider, e_driver, e_discount])
+
+    # [FIX 1] Compute BLENDED efficiency for hurdle rate (not best_e)
+    # The lever split is proportional to ROI, so blended_e reflects actual deployment
+    roi_sum_for_blend = df['roi_rider'] + df['roi_driver'] + df['roi_discount']
+    blend_pct_r = np.where(roi_sum_for_blend > 0, df['roi_rider'] / roi_sum_for_blend, 0.0)
+    blend_pct_d = np.where(roi_sum_for_blend > 0, df['roi_driver'] / roi_sum_for_blend, 0.0)
+    blend_pct_disc = np.where(roi_sum_for_blend > 0, df['roi_discount'] / roi_sum_for_blend, 0.0)
+    df['blended_e'] = e_rider * blend_pct_r + e_driver * blend_pct_d + e_discount * blend_pct_disc
 
     # --- 5. HURDLE RATE FILTER ---
     df['ltv_strat'] = df['tier'].map(ltv_map)
-    df['pv_per_dollar'] = df['best_e'] * df['Avg_Fare'] * margin * (1 + ltv_fin_mult + df['ltv_strat']) - 1
+    # [FIX 1] Hurdle uses blended efficiency — reflects actual deployment, not best-case
+    df['pv_per_dollar'] = df['blended_e'] * df['Avg_Fare'] * margin * (1 + ltv_fin_mult + df['ltv_strat']) - 1
     df['supply_crisis'] = (df['Surge'] > 0.25) & (df['CR'] < 0.72)
     # Critical markets bypass the hurdle for strategic defense
     df['passes_hurdle'] = (df['tier'] == 'CRITICAL') | df['supply_crisis'] | (df['pv_per_dollar'] >= hurdle_rate)
@@ -155,7 +178,7 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
     # --- 7. CAPS & MINIMUM INVESTMENT ---
     lift = np.minimum(df['Redline'] - df['Share'] + 0.01, df['Surge'])
     trips_need = lift * df['Trips_Base'] / 0.5
-    df['min_investment'] = np.where((df['tier'] == 'CRITICAL') & (df['best_e'] > 0), trips_need / df['best_e'], 0.0)
+    df['min_investment'] = np.where((df['tier'] == 'CRITICAL') & (df['blended_e'] > 0), trips_need / df['blended_e'], 0.0)
     df['cap'] = df['GB'] * cap_pct
     df['min_investment'] = df[['min_investment', 'cap']].min(axis=1)
 
@@ -185,26 +208,31 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
     budget_returned = BUDGET - budget_used
 
     # --- 9. IMPACT PROJECTION ---
-    roi_total = df['roi_rider'] + df['roi_driver']
+    # [FIX 2] Three-way lever split: Rider / Driver / Discount (proportional to ROI)
+    roi_total = df['roi_rider'] + df['roi_driver'] + df['roi_discount']
     valid_roi = (roi_total > 0) & (df['investment'] > 0)
 
-    pct_r = np.where(valid_roi, df['roi_rider'] / roi_total, 0.0)
-    pct_d = np.where(valid_roi, df['roi_driver'] / roi_total, 0.0)
+    pct_r    = np.where(valid_roi, df['roi_rider']    / roi_total, 0.0)
+    pct_d    = np.where(valid_roi, df['roi_driver']   / roi_total, 0.0)
+    pct_disc = np.where(valid_roi, df['roi_discount'] / roi_total, 0.0)
 
-    inv_r = df['investment'] * pct_r
-    inv_d = df['investment'] * pct_d
+    inv_r    = df['investment'] * pct_r
+    inv_d    = df['investment'] * pct_d
+    inv_disc = df['investment'] * pct_disc
 
-    trips_r = np.where((inv_r > 0) & df['rider_ok'], inv_r / df['CPIT'], 0.0)
-    trips_d = np.where((inv_d > 0) & df['driver_ok'], (inv_d / df['CPISH']) * df['TPH'] * (1 / df['CR']), 0.0)
+    trips_r    = np.where((inv_r > 0) & df['rider_ok'], inv_r / df['CPIT'], 0.0)
+    trips_d    = np.where((inv_d > 0) & df['driver_ok'], (inv_d / df['CPISH']) * df['TPH'] * (1 / df['CR']), 0.0)
+    trips_disc = np.where(inv_disc > 0, inv_disc * e_discount, 0.0)
     
-    # Impact = Rider trips + Driver trips + Pricing-adjusted trips
-    trips = trips_r + trips_d + df['trips_price_impact']
-    cash_outlay = inv_r + inv_d
+    # Impact = Rider trips + Driver trips + Discount trips + Pricing-increase trips
+    trips = trips_r + trips_d + trips_disc + df['trips_price_impact']
+    cash_outlay = inv_r + inv_d + inv_disc
 
     gb_delta = trips * df['Avg_Fare']
-    # Profit Q1 (NPM1) = Incremental Margin + Price Rev - Cash Spent
+    # Profit Q1 (NPM1) = Incremental Margin + Price-Increase Rev - Cash Spent
     npm1 = (gb_delta * margin) + df['pricing_revenue'] - cash_outlay
     
+    # [FIX 3] LTV with reduced strategic multipliers (default 1.5/0.75/0.5 instead of 3/2/1.5)
     ltv_financial = gb_delta * margin * ltv_fin_mult
     ltv_strategic = gb_delta * margin * df['ltv_strat']
     ltv = ltv_financial + ltv_strategic
@@ -228,8 +256,10 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
         'Investment': df['investment'],
         'Cash_Investment': cash_outlay,
         'Pricing_Revenue': df['pricing_revenue'],
+        'Discount_Cost': inv_disc,
         'Rider_Pct': pct_r,
         'Driver_Pct': pct_d,
+        'Discount_Pct': pct_disc,
         'Trips_Q1': trips,
         'GB_Delta_Q1': gb_delta,
         'NPM1': npm1,
