@@ -76,10 +76,10 @@ def load_market_data():
 # =============================================================================
 # --- FINANCIAL & LTV UTILITIES ---
 # =============================================================================
-def compute_ltv_mult_base(retention=0.35, discount_rate=0.025, n_quarters=8):
+def compute_ltv_mult_base(retention=0.35, discount_rate=0.025, n_quarters=4):
     return sum((retention ** t) / ((1 + discount_rate) ** t) for t in range(1, n_quarters + 1))
 
-def build_ltv_curves(retention=0.35, discount_rate=0.025, n_quarters=8, ltv_critical=3.0, ltv_mild=2.0, ltv_safe=1.5):
+def build_ltv_curves(retention=0.35, discount_rate=0.025, n_quarters=4, ltv_critical=3.0, ltv_mild=2.0, ltv_safe=1.5):
     rows = []
     pv_accum = ret_accum = 0.0
     for t in range(1, n_quarters + 1):
@@ -99,7 +99,6 @@ def build_ltv_curves(retention=0.35, discount_rate=0.025, n_quarters=8, ltv_crit
 # --- MAIN OPTIMIZATION ENGINE ---
 # =============================================================================
 def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
-                     w_critical=2.0, w_mild=1.3, w_safe=1.0, growth_weight=0.5,
                      ltv_critical=1.5, ltv_mild=0.75, ltv_safe=0.50, hurdle_rate=1.5,
                      discount_elasticity=1.0):
     
@@ -170,10 +169,7 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
     df['passes_hurdle'] = (df['tier'] == 'CRITICAL') | df['supply_crisis'] | (df['pv_per_dollar'] >= hurdle_rate)
 
     # --- 6. COMPOSITE SCORING ---
-    weight_map = {'CRITICAL': w_critical, 'MILD': w_mild, 'SAFE': w_safe}
-    df['weight'] = df['tier'].map(weight_map)
-    df['growth_bonus'] = 1.0 + df['Growth'].clip(lower=0) * growth_weight
-    df['score'] = np.where(df['passes_hurdle'], df['best_roi'] * df['weight'] * df['growth_bonus'], 0.0)
+    df['score'] = np.where(df['passes_hurdle'], df['best_roi'], 0.0)
 
     # --- 7. CAPS & MINIMUM INVESTMENT ---
     lift = np.minimum(df['Redline'] - df['Share'] + 0.01, df['Surge'])
@@ -232,10 +228,8 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
     # Profit Q1 (NPM1) = Incremental Margin + Price-Increase Rev - Cash Spent
     npm1 = (gb_delta * margin) + df['pricing_revenue'] - cash_outlay
     
-    # [FIX 3] LTV with reduced strategic multipliers (default 1.5/0.75/0.5 instead of 3/2/1.5)
-    ltv_financial = gb_delta * margin * ltv_fin_mult
-    ltv_strategic = gb_delta * margin * df['ltv_strat']
-    ltv = ltv_financial + ltv_strategic
+    # LTV = single component combining retention-based cash flow + tier premium
+    ltv = gb_delta * margin * (ltv_fin_mult + df['ltv_strat'])
     platform_value = npm1 + ltv 
 
     raw_lift = np.where(df['Trips_Base'] > 0, (trips / df['Trips_Base']) * 0.5, 0.0)
@@ -263,8 +257,6 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
         'Trips_Q1': trips,
         'GB_Delta_Q1': gb_delta,
         'NPM1': npm1,
-        'LTV_Financial': ltv_financial,
-        'LTV_Strategic': ltv_strategic,
         'LTV': ltv,
         'Platform_Value': platform_value,
         'Share_Q0': df['Share'],
