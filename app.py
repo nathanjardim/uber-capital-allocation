@@ -185,54 +185,25 @@ st.sidebar.markdown("""
 st.sidebar.markdown("**💰 Budget & Caps**")
 budget_pct = st.sidebar.slider(
     "Budget (% of Total GB)", 5, 25, 10, 1,
-    help="Percentage of total GB available for investment"
 ) / 100
 cap_pct = st.sidebar.slider(
     "Max per Market (% of own GB)", 5, 40, 20, 5,
-    help="Cap on how much a single market can receive"
 ) / 100
 margin = st.sidebar.slider(
     "Platform Margin (%)", 15, 40, 25, 5,
-    help="Platform operating margin"
 ) / 100
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**📈 LTV Multipliers**")
-st.sidebar.caption(
-    "Horizon: **4 quarters (1 year)**\n\n"
-    "Base retention: **35%/qtr** · Discount: **2.5%/qtr** (~10% p.a., Uber WACC)\n\n"
-    "Pure-retention LTV base ≈ **0.51×**\n\n"
-    "Tier multipliers include a strategic competitive-position premium."
-)
 ltv_critical = st.sidebar.slider("LTV mult — CRITICAL", 0.5, 5.0, 1.5, 0.25)
 ltv_mild     = st.sidebar.slider("LTV mult — MILD",     0.25, 4.0, 0.75, 0.25)
 ltv_safe     = st.sidebar.slider("LTV mult — SAFE",     0.25, 3.0, 0.50, 0.25)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**📉 Hurdle Rate**")
-st.sidebar.caption(
-    "Minimum Platform Value per $ invested to receive discretionary budget.\n\n"
-    "PV/$ is computed using **blended lever efficiency** (weighted average "
-    "of Rider, Driver and Discount ROIs) — reflects actual deployment, "
-    "not best-case.\n\n"
-    "CRITICAL markets are always included — position defense is a strategic "
-    "decision, not a financial one.\n\n"
-    "**Reference:** Uber WACC ~10% p.a. → 1.5× conservative over a "
-    "quarterly horizon (GuruFocus / Alpha Spread, 2024-25)"
-)
 hurdle_rate = st.sidebar.slider("Min PV per $ (hurdle)", 0.5, 4.0, 1.5, 0.5)
 
 st.sidebar.markdown("---")
-st.sidebar.caption(
-    "**Lever rules**\n\n"
-    "- Rider locked if CM < 0%\n"
-    "- Driver locked if CM < −10%\n"
-    "- Price increase unlocked if >3% cheaper than comp (self-funded revenue)\n"
-    "- Price discount unlocked if >3% more expensive than comp (budget-funded)\n"
-    "- Price increase ROI penalized 15% (demand elasticity)\n"
-    "- Driver ROI amplified by 1/C·R (latent unmet demand)\n"
-    "- Share lift capped by market Surge"
-)
 
 # ============================================================================
 # SECTION 1 — MARKET INPUTS
@@ -240,11 +211,7 @@ st.sidebar.caption(
 
 st.markdown('<hr class="uber-divider">', unsafe_allow_html=True)
 st.markdown('<p class="section-title">📥 Market Inputs</p>', unsafe_allow_html=True)
-st.markdown(
-    '<p class="section-caption">Case data. Edit any cell to simulate alternative scenarios. '
-    'Surge = share lift ceiling (real supply gap). C/R = efficiency amplifier for the Driver lever.</p>',
-    unsafe_allow_html=True
-)
+
 
 df_default = load_market_data()
 df_edited = st.data_editor(
@@ -337,11 +304,7 @@ if run:
 
     # ── Strategic Matrix ───────────────────────────────────────────────────
     st.markdown('<p class="section-title">🗺️ Strategic Market Classification</p>', unsafe_allow_html=True)
-    st.markdown(
-        '<p class="section-caption">Tier = market share position relative to redline. '
-        'CRITICAL markets receive a guaranteed minimum investment regardless of hurdle.</p>',
-        unsafe_allow_html=True
-    )
+
 
     critical_markets = results[results['Tier'] == 'CRITICAL']['Market'].tolist()
     mild_markets     = results[results['Tier'] == 'MILD']['Market'].tolist()
@@ -382,13 +345,7 @@ if run:
 
     # ── OUTPUT 1: CITY-LEVEL ALLOCATION ───────────────────────────────────
     st.markdown('<p class="section-title">1️⃣ City-Level Allocation</p>', unsafe_allow_html=True)
-    st.markdown(
-        '<p class="section-caption">Score = ROI/$ × strategic weight × growth bonus. '
-        'CRITICAL markets receive a guaranteed minimum investment. '
-        'PV/$ uses blended lever efficiency (actual deployment mix). '
-        'Markets below the hurdle receive $0 (capital preserved).</p>',
-        unsafe_allow_html=True
-    )
+
 
     t1 = results[[
         'Market', 'Tier', 'Score', 'PV_per_Dollar', 'Passes_Hurdle',
@@ -412,10 +369,7 @@ if run:
 
     # ── OUTPUT 2: LEVER MIX ───────────────────────────────────────────────
     st.markdown('<p class="section-title">2️⃣ Lever Mix</p>', unsafe_allow_html=True)
-    st.markdown(
-        '<p class="section-caption">Split proportional to the relative ROI of each eligible lever per market.</p>',
-        unsafe_allow_html=True
-    )
+
 
     t2 = results[results['Investment'] > 0][[
         'Market', 'Tier', 'Cash_Investment', 'Pricing_Revenue', 'Discount_Cost',
@@ -440,27 +394,12 @@ if run:
     })
     st.dataframe(t2, use_container_width=True, hide_index=True)
     
-    st.info(
-        "💡 **Cash Outlay** = total disbursement across Rider, Driver & Pricing Discount levers · "
-        "**Price Increase** = raising base fare in markets where we're >3% cheaper than competition (self-funded, no budget cost) · "
-        "**Price Discount** = reducing fare in markets where we're >3% more expensive (budget-funded, closes half the fare gap) · "
-        "Driver ROI amplified by 1/C·R (latent unmet demand) · "
-        "Lever split proportional to each lever's ROI"
-    )
+
     st.markdown('<hr class="uber-divider">', unsafe_allow_html=True)
 
     # ── OUTPUT 3: IMPACT PROJECTION ───────────────────────────────────────
     st.markdown('<p class="section-title">3️⃣ Impact Projection</p>', unsafe_allow_html=True)
-    st.markdown(
-        f'<p class="section-caption">'
-        f'NPM1 = incremental GB × margin − investment. '
-        f'LTV = Q1 trips × fare × margin × tier multiplier. '
-        f'<strong>Horizon: 4 quarters (1 year)</strong> · '
-        f'Base retention 35%/qtr · Discount 2.5%/qtr · '
-        f'Pure-retention LTV base ≈ {summary["ltv_mult_base"]:.2f}× · '
-        f'Tier multipliers include a strategic competitive-position premium.</p>',
-        unsafe_allow_html=True
-    )
+
 
     t3 = results[[
         'Market', 'Tier', 'Trips_Q1', 'GB_Delta_Q1', 'NPM1',
@@ -484,12 +423,7 @@ if run:
 
     # ── LTV Curve ──────────────────────────────────────────────────────────
     st.markdown("#### 📈 Platform Value Accumulation — 4-Quarter Horizon")
-    st.caption(
-        "Cumulative platform value per market over 4 quarters. "
-        "Q1 = direct NPM1. Q2–Q4 = compound retention (35%/qtr) discounted at 2.5%/qtr "
-        "on the incremental revenue generated by the investment. "
-        "Markets with no investment are not shown."
-    )
+
 
     RETENTION  = 0.35
     DISCOUNT   = 0.025
@@ -579,11 +513,6 @@ if run:
 
     # ── OUTPUT 4: HURDLE RATE SUMMARY ─────────────────────────────────────
     st.markdown('<p class="section-title">4️⃣ Hurdle Rate Summary</p>', unsafe_allow_html=True)
-    st.markdown(
-        f'<p class="section-caption">Hurdle = {hurdle_rate:.1f}× · '
-        f'Reference: Uber WACC ~10% p.a. (GuruFocus / Alpha Spread, 2024-25)</p>',
-        unsafe_allow_html=True
-    )
 
     t4 = results[[
         'Market', 'Tier', 'PV_per_Dollar', 'Passes_Hurdle', 'Investment'
@@ -597,14 +526,7 @@ if run:
     })
     st.dataframe(t4, use_container_width=True, hide_index=True)
 
-    if summary['returned'] > 0:
-        st.success(
-            f"💰 **${summary['returned']:.2f}M preserved** — "
-            f"{summary['markets_excluded']} market(s) did not meet the "
-            f"{hurdle_rate:.1f}× hurdle and were excluded from discretionary allocation."
-        )
-    else:
-        st.info("ℹ️ All eligible markets passed the hurdle — full budget deployed.")
+
 
     # ── EXPORT ────────────────────────────────────────────────────────────
     st.markdown('<hr class="uber-divider">', unsafe_allow_html=True)
