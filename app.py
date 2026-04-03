@@ -349,20 +349,18 @@ if run:
 
     t1 = results[[
         'Market', 'Tier', 'Score', 'PV_per_Dollar', 'Passes_Hurdle',
-        'Investment', 'Share_Q0', 'Share_Q1', 'Redline', 'Redline_Q1_OK', 'Platform_Value'
+        'Investment', 'Share_Q0', 'Share_Q1', 'Redline', 'Redline_Q1_OK'
     ]].copy()
-    t1['Score']          = t1['Score'].apply(lambda v: f"{v:.3f}")
-    t1['PV_per_Dollar']  = t1['PV_per_Dollar'].apply(lambda v: f"{v:.2f}×")
-    t1['Investment']     = t1['Investment'].apply(lambda v: f"${v/1e6:.2f}M")
-    t1['Share_Q0']       = t1['Share_Q0'].apply(lambda v: f"{v:.1%}")
-    t1['Share_Q1']       = t1['Share_Q1'].apply(lambda v: f"{v:.1%}")
-    t1['Redline']        = t1['Redline'].apply(lambda v: f"{v:.0%}")
-    t1['Platform_Value'] = t1['Platform_Value'].apply(lambda v: f"${v/1e6:.1f}M")
+    t1['Score']         = t1['Score'].apply(lambda v: f"{v:.3f}")
+    t1['PV_per_Dollar'] = t1['PV_per_Dollar'].apply(lambda v: f"{v:.2f}×")
+    t1['Investment']    = t1['Investment'].apply(lambda v: f"${v/1e6:.2f}M")
+    t1['Share_Q0']      = t1['Share_Q0'].apply(lambda v: f"{v:.1%}")
+    t1['Share_Q1']      = t1['Share_Q1'].apply(lambda v: f"{v:.1%}")
+    t1['Redline']       = t1['Redline'].apply(lambda v: f"{v:.0%}")
     t1 = t1.rename(columns={
         'PV_per_Dollar': 'PV per $', 'Passes_Hurdle': 'Hurdle',
         'Investment': 'Total Investment', 'Share_Q0': 'Share (current)',
         'Share_Q1': 'Share Q1 (post-inv)', 'Redline_Q1_OK': 'Above Redline Q1',
-        'Platform_Value': 'Total Platform Value',
     })
     st.dataframe(t1, use_container_width=True, hide_index=True)
     st.markdown('<hr class="uber-divider">', unsafe_allow_html=True)
@@ -372,11 +370,10 @@ if run:
 
 
     t2 = results[results['Investment'] > 0][[
-        'Market', 'Tier', 'Cash_Investment', 'Pricing_Revenue', 'Discount_Cost',
-        'Rider_Pct', 'Driver_Pct', 'Discount_Pct'
+        'Market', 'Tier', 'Rider_Pct', 'Driver_Pct', 'Discount_Pct',
+        'Discount_Cost', 'Pricing_Revenue'
     ]].copy()
 
-    t2['Cash_Investment'] = t2['Cash_Investment'].apply(lambda v: f"${v/1e6:.2f}M")
     t2['Pricing_Revenue'] = t2['Pricing_Revenue'].apply(lambda v: f"${v/1e6:.2f}M" if v > 0 else "—")
     t2['Discount_Cost']   = t2['Discount_Cost'].apply(lambda v: f"${v/1e6:.2f}M" if v > 1000 else "—")
 
@@ -385,12 +382,11 @@ if run:
     t2['Discount_Pct'] = t2['Discount_Pct'].apply(lambda v: f"{v:.0%}" if v > 0.001 else "—")
 
     t2 = t2.rename(columns={
-        'Cash_Investment': 'Total Cash Outlay (10% Budget)',
-        'Pricing_Revenue': 'Price Increase Rev (Self-Funded)',
-        'Discount_Cost': 'Discount Cost (Budget-Funded)',
-        'Rider_Pct': 'Rider Incentives (%)',
-        'Driver_Pct': 'Driver Incentives (%)',
-        'Discount_Pct': 'Pricing Discount (%)',
+        'Rider_Pct':      'Rider Incentives (%)',
+        'Driver_Pct':     'Driver Incentives (%)',
+        'Discount_Pct':   'Pricing Discount (%)',
+        'Discount_Cost':  'Discount Cost (Budget-Funded)',
+        'Pricing_Revenue':'Price Increase Rev (Self-Funded)',
     })
     st.dataframe(t2, use_container_width=True, hide_index=True)
     
@@ -447,8 +443,13 @@ if run:
             values.append(round(cumulative / 1e6, 3))
         curve_data[row['Market']] = {'values': values, 'tier': row['Tier']}
 
-    tier_color = {'CRITICAL': '#EF4444', 'MILD': '#F59E0B', 'SAFE': '#06C167'}
-    tier_dash  = {'CRITICAL': 'solid',   'MILD': 'dash',    'SAFE': 'dot'}
+    MARKET_COLORS = [
+        '#EF4444', '#3B82F6', '#06C167', '#F59E0B', '#8B5CF6',
+        '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16',
+        '#06B6D4', '#D97706', '#10B981', '#E11D48', '#7C3AED',
+    ]
+    all_markets  = list(curve_data.keys())
+    market_color = {m: MARKET_COLORS[i % len(MARKET_COLORS)] for i, m in enumerate(all_markets)}
 
     tab_all, tab_critical, tab_mild, tab_safe = st.tabs(
         ["All Markets", "🔴 CRITICAL", "🟡 MILD", "🟢 SAFE"]
@@ -463,8 +464,8 @@ if run:
                 x=quarters,
                 y=info['values'],
                 mode='lines+markers',
-                name=f"{market} ({info['tier']})",
-                line=dict(color=tier_color[info['tier']], width=2.5, dash=tier_dash[info['tier']]),
+                name=market,
+                line=dict(color=market_color[market], width=2.5, dash='solid'),
                 marker=dict(size=6, symbol='circle'),
                 hovertemplate=(
                     f"<b>{market}</b><br>"
@@ -508,25 +509,6 @@ if run:
         st.plotly_chart(build_fig(['MILD']), use_container_width=True)
     with tab_safe:
         st.plotly_chart(build_fig(['SAFE']), use_container_width=True)
-
-    st.markdown('<hr class="uber-divider">', unsafe_allow_html=True)
-
-    # ── OUTPUT 4: HURDLE RATE SUMMARY ─────────────────────────────────────
-    st.markdown('<p class="section-title">4️⃣ Hurdle Rate Summary</p>', unsafe_allow_html=True)
-
-    t4 = results[[
-        'Market', 'Tier', 'PV_per_Dollar', 'Passes_Hurdle', 'Investment'
-    ]].copy().sort_values('PV_per_Dollar', ascending=False)
-    t4['PV_per_Dollar'] = t4['PV_per_Dollar'].apply(lambda v: f"{v:.2f}×")
-    t4['Investment']    = t4['Investment'].apply(lambda v: f"${v/1e6:.2f}M" if v > 0 else "—")
-    t4 = t4.rename(columns={
-        'PV_per_Dollar': 'Platform Value per $',
-        'Passes_Hurdle': 'Passes Hurdle',
-        'Investment':    'Allocated',
-    })
-    st.dataframe(t4, use_container_width=True, hide_index=True)
-
-
 
     # ── EXPORT ────────────────────────────────────────────────────────────
     st.markdown('<hr class="uber-divider">', unsafe_allow_html=True)
