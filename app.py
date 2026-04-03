@@ -178,7 +178,6 @@ st.markdown("""
 st.sidebar.markdown("""
 <div style="padding: 4px 0 12px 0;">
     <p style="font-size:16px; font-weight:700; color:#111827; margin:0;">Model Parameters</p>
-    <p style="font-size:11px; color:#9CA3AF; margin:4px 0 0 0;">Adjust assumptions to simulate scenarios</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -195,13 +194,13 @@ margin = st.sidebar.slider(
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**📈 LTV Multipliers**")
-ltv_critical = st.sidebar.slider("LTV mult — CRITICAL", 0.5, 5.0, 1.5, 0.25)
-ltv_mild     = st.sidebar.slider("LTV mult — MILD",     0.25, 4.0, 0.75, 0.25)
-ltv_safe     = st.sidebar.slider("LTV mult — SAFE",     0.25, 3.0, 0.50, 0.25)
+ltv_critical = st.sidebar.slider("CRITICAL", 0.5, 5.0, 1.5, 0.25)
+ltv_mild     = st.sidebar.slider("MILD",     0.25, 4.0, 0.75, 0.25)
+ltv_safe     = st.sidebar.slider("SAFE",     0.25, 3.0, 0.50, 0.25)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**📉 Hurdle Rate**")
-hurdle_rate = st.sidebar.slider("Min PV per $ (hurdle)", 0.5, 4.0, 1.5, 0.5)
+hurdle_rate = st.sidebar.slider("Min PV per $", 0.5, 4.0, 1.5, 0.5)
 
 st.sidebar.markdown("---")
 
