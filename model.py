@@ -237,7 +237,7 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
         df['Share'] + raw_lift,
         df['Share'] + (1 - df['CR']),
         df['Share'] + df['Surge'],
-        np.ones(len(df))
+        np.full(len(df), 0.95)
     ])
 
     # --- 10. RESULTS AGGREGATION ---
