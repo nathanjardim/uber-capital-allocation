@@ -304,7 +304,6 @@ if run:
     # ── Strategic Matrix ───────────────────────────────────────────────────
     st.markdown('<p class="section-title">🗺️ Strategic Market Classification</p>', unsafe_allow_html=True)
 
-
     critical_markets = results[results['Tier'] == 'CRITICAL']['Market'].tolist()
     mild_markets     = results[results['Tier'] == 'MILD']['Market'].tolist()
     safe_markets     = results[results['Tier'] == 'SAFE']['Market'].tolist()
@@ -345,7 +344,6 @@ if run:
     # ── OUTPUT 1: CITY-LEVEL ALLOCATION ───────────────────────────────────
     st.markdown('<p class="section-title">1️⃣ City-Level Allocation</p>', unsafe_allow_html=True)
 
-
     t1 = results[[
         'Market', 'Tier', 'Score', 'PV_per_Dollar', 'Passes_Hurdle',
         'Investment', 'Share_Q0', 'Share_Q1', 'Redline', 'Redline_Q1_OK'
@@ -367,7 +365,6 @@ if run:
     # ── OUTPUT 2: LEVER MIX ───────────────────────────────────────────────
     st.markdown('<p class="section-title">2️⃣ Lever Mix</p>', unsafe_allow_html=True)
 
-
     t2 = results[results['Investment'] > 0][[
         'Market', 'Tier', 'Rider_Pct', 'Driver_Pct', 'Discount_Pct',
         'Discount_Cost', 'Pricing_Revenue'
@@ -375,10 +372,9 @@ if run:
 
     t2['Pricing_Revenue'] = t2['Pricing_Revenue'].apply(lambda v: f"${v/1e6:.2f}M" if v > 0 else "—")
     t2['Discount_Cost']   = t2['Discount_Cost'].apply(lambda v: f"${v/1e6:.2f}M" if v > 1000 else "—")
-
-    t2['Rider_Pct']    = t2['Rider_Pct'].apply(lambda v: f"{v:.0%}")
-    t2['Driver_Pct']   = t2['Driver_Pct'].apply(lambda v: f"{v:.0%}")
-    t2['Discount_Pct'] = t2['Discount_Pct'].apply(lambda v: f"{v:.0%}" if v > 0.001 else "—")
+    t2['Rider_Pct']       = t2['Rider_Pct'].apply(lambda v: f"{v:.0%}")
+    t2['Driver_Pct']      = t2['Driver_Pct'].apply(lambda v: f"{v:.0%}")
+    t2['Discount_Pct']    = t2['Discount_Pct'].apply(lambda v: f"{v:.0%}" if v > 0.001 else "—")
 
     t2 = t2.rename(columns={
         'Rider_Pct':      'Rider Incentives (%)',
@@ -388,13 +384,11 @@ if run:
         'Pricing_Revenue':'Price Increase Rev (Self-Funded)',
     })
     st.dataframe(t2, use_container_width=True, hide_index=True)
-    
 
     st.markdown('<hr class="uber-divider">', unsafe_allow_html=True)
 
     # ── OUTPUT 3: IMPACT PROJECTION ───────────────────────────────────────
     st.markdown('<p class="section-title">3️⃣ Impact Projection</p>', unsafe_allow_html=True)
-
 
     t3 = results[[
         'Market', 'Tier', 'Trips_Q1', 'GB_Delta_Q1', 'NPM1',
@@ -419,23 +413,24 @@ if run:
     # ── LTV Curve ──────────────────────────────────────────────────────────
     st.markdown("#### 📈 Platform Value Accumulation — 4-Quarter Horizon")
 
-
     RETENTION  = 0.35
     DISCOUNT   = 0.025
     N_QUARTERS = 4
     quarters   = [f"Q{t}" for t in range(1, N_QUARTERS + 1)]
 
-    funded     = results[results['Investment'] > 0].copy()
-    curve_data = {}
+    funded        = results[results['Investment'] > 0].copy()
+    curve_data    = {}
+    ltv_strat_map = {'CRITICAL': ltv_critical, 'MILD': ltv_mild, 'SAFE': ltv_safe}
 
     for _, row in funded.iterrows():
-        npm1       = row['NPM1']
-        gb_delta   = row['GB_Delta_Q1']
+        npm1      = row['NPM1']
+        gb_delta  = row['GB_Delta_Q1']
+        ltv_strat = ltv_strat_map[row['Tier']]
         cumulative = 0.0
         values     = []
         for t in range(1, N_QUARTERS + 1):
             if t == 1:
-                cumulative += npm1
+                cumulative += npm1 + gb_delta * margin * ltv_strat
             else:
                 pv_t = gb_delta * margin * (RETENTION ** t) / ((1 + DISCOUNT) ** t)
                 cumulative += pv_t
@@ -501,13 +496,13 @@ if run:
         return fig
 
     with tab_all:
-        st.plotly_chart(build_fig(), use_container_width=True)
+        st.plotly_chart(build_fig(), use_container_width=True, key="chart_all")
     with tab_critical:
-        st.plotly_chart(build_fig(['CRITICAL']), use_container_width=True)
+        st.plotly_chart(build_fig(['CRITICAL']), use_container_width=True, key="chart_critical")
     with tab_mild:
-        st.plotly_chart(build_fig(['MILD']), use_container_width=True)
+        st.plotly_chart(build_fig(['MILD']), use_container_width=True, key="chart_mild")
     with tab_safe:
-        st.plotly_chart(build_fig(['SAFE']), use_container_width=True)
+        st.plotly_chart(build_fig(['SAFE']), use_container_width=True, key="chart_safe")
 
     # ── EXPORT ────────────────────────────────────────────────────────────
     st.markdown('<hr class="uber-divider">', unsafe_allow_html=True)
