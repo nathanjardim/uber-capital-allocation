@@ -135,7 +135,6 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
     df['roi_rider']  = np.where(df['rider_ok'], (1.0 / df['CPIT']) * df['Avg_Fare'] * margin, 0.0)
     df['roi_driver'] = np.where(df['driver_ok'], (df['TPH'] / df['CPISH']) * (1.0 / df['CR']) * df['Avg_Fare'] * margin, 0.0)
     
-    # [FIX 2] Pricing discount ROI: competes for budget alongside Rider & Driver
     # Discount closes half the fare gap (capped at 10%), generates trips via elasticity
     fare_gap = (df['Avg_Fare'] / df['Comp_Fare'] - 1).clip(lower=0)
     df['discount_pct'] = np.where(df['price_down_ok'], np.minimum(fare_gap * 0.5, 0.10), 0.0)
@@ -152,7 +151,6 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
     e_driver = np.where(df['driver_ok'], (df['TPH'] / df['CPISH']) * (1.0 / df['CR']), 0.0)
     df['best_e'] = np.maximum.reduce([e_rider, e_driver, e_discount])
 
-    # [FIX 1] Compute BLENDED efficiency for hurdle rate (not best_e)
     # The lever split is proportional to ROI, so blended_e reflects actual deployment
     roi_sum_for_blend = df['roi_rider'] + df['roi_driver'] + df['roi_discount']
     blend_pct_r = np.where(roi_sum_for_blend > 0, df['roi_rider'] / roi_sum_for_blend, 0.0)
@@ -204,7 +202,6 @@ def run_optimization(df, budget_pct=0.10, cap_pct=0.20, margin=0.25,
     budget_returned = BUDGET - budget_used
 
     # --- 9. IMPACT PROJECTION ---
-    # [FIX 2] Three-way lever split: Rider / Driver / Discount (proportional to ROI)
     roi_total = df['roi_rider'] + df['roi_driver'] + df['roi_discount']
     valid_roi = (roi_total > 0) & (df['investment'] > 0)
 
